@@ -38,7 +38,7 @@ class Verifier:
         """
         self.use_gpu = use_gpu
         self.debug = debug
-		self.model_dir = '/tmp/model'
+        self.model_dir = '/tmp/model'
         if os.path.isdir(model):
             self.model_dir = model
         else:
