@@ -122,7 +122,7 @@ python -m pytest testing/tests
 
 ## 6. lvpdiff filter Tests
 
-First, build and install ffmpeg with lvpdiff filter
+First, build and install ffmpeg with lvpdiff filter. The document can be found [here](https://github.com/oscar-davids/FFmpeg/blob/dev-lvpdiff-cuda/README.md)
 
 cd verification-classifier
 
