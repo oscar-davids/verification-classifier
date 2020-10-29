@@ -19,6 +19,7 @@ from scipy.io import wavfile
 from catboost import CatBoostClassifier
 from catboost import CatBoostRegressor
 from verifier import file_locker
+from pathlib import Path
 
 from scripts.asset_processor.video_asset_processor import VideoAssetProcessor
 
@@ -37,7 +38,7 @@ class Verifier:
         """
         self.use_gpu = use_gpu
         self.debug = debug
-        self.model_dir = '/tmp/model'
+		self.model_dir = '/tmp/model'
         if os.path.isdir(model):
             self.model_dir = model
         else:
@@ -121,6 +122,89 @@ class Verifier:
         if row['ul_pred_tamper'] == 0:
             return 0
         return row['sl_pred_tamper']
+		
+    def verifylvpfilter(self, source_uri, renditions, calcmode='cpu'):
+        """
+        Function that returns the predicted compliance of a list of renditions
+        with respect to a given source file using a specified model.
+        """
+        total_start = timeit.default_timer()
+        # lvpdiff = stats_file=stats.log:calcmode = cuda
+        # lvpdiffparam = 'lvpdiff=calcmode=cpu'
+        lvpdiffparam = 'lvpdiff=stats_file=stats.log:' + 'calcmode=' + calcmode
+
+        diffmatrix = np.zeros((len(renditions), 9), dtype=np.float64)
+
+        rowidx = 0
+        for rendition in renditions:
+            fvsize = Path(rendition['uri']).stat().st_size
+
+            args = ['ffmpeg', '-y', '-i', source_uri, '-i', rendition['uri'],
+                    '-lavfi', lvpdiffparam, '-f', 'null', '-'
+                    ]
+            p = subprocess.Popen(args)
+            out, err = p.communicate()
+            assert not err
+
+            f = open("stats.log", "r")
+            sline = f.read()
+            sarray = sline.split(" ")
+
+            colmatrix = []
+            for sval in sarray:
+                svalarr = sval.split(":")
+                if len(svalarr) > 1:
+                    colmatrix.append(np.float64(svalarr[1]))
+            sizerate = fvsize /  (colmatrix[1] * colmatrix[2])
+            colmatrix.insert(3, sizerate)
+
+            for i in range(len(colmatrix)):
+                diffmatrix[rowidx, i] = colmatrix[i]
+
+            rowidx = rowidx + 1
+
+        try:
+            #[metatamper, videoalive, audioalive, fps, width, height, audiodiff,
+            # sizeratio, dctdiff, gaussiamse, gaussiandiff, gaussianthreshold, histogramdiff]
+            #diffmatrix = extractfts.calc_featurediff(source_uri, renditionlist, self.max_samples)
+
+            for i, rendition in enumerate(renditions):
+                rendition['audio_dist'] = -1.0
+                rendition['video_available'] = None
+                rendition['audio_available'] = None
+
+                rendition['video_available'] = True
+                rendition['audio_available'] = True
+                rendition['audio_dist'] = 0.0
+
+
+                rendition['fps'] = diffmatrix[i,0]
+                rendition['pixels'] = diffmatrix[i,1] * diffmatrix[i,2]
+
+            x_renditions_sl = np.asarray(diffmatrix[:, 3:])
+            x_renditions_ul = np.asarray(diffmatrix[:, 3:])
+
+            x_renditions_ul = self.loaded_scaler.transform(x_renditions_ul)
+            np.set_printoptions(precision=6, suppress=True)
+            # Make predictions for given data
+            start = timeit.default_timer()
+            predictions_df = pd.DataFrame()
+            predictions_df['sl_pred_tamper'] = self.loaded_model_sl.predict(x_renditions_sl)
+            predictions_df['ocsvm_dist'] = self.loaded_model_ul.decision_function(x_renditions_ul)
+            predictions_df['ul_pred_tamper'] = (-self.loaded_model_ul.predict(x_renditions_ul) + 1) / 2
+            predictions_df['meta_pred_tamper'] = predictions_df.apply(self.meta_model, axis=1)
+            prediction_time = timeit.default_timer() - start
+            i = 0
+            for _, rendition in enumerate(renditions):
+                if rendition['video_available']:
+                    rendition['ocsvm_dist'] = float(predictions_df['ocsvm_dist'].iloc[i])
+                    rendition['tamper_ul'] = int(predictions_df['ul_pred_tamper'].iloc[i])
+                    rendition['tamper_sl'] = int(predictions_df['sl_pred_tamper'].iloc[i])
+                    rendition['tamper'] = int(predictions_df['meta_pred_tamper'].iloc[i])
+                    i += 1
+            return renditions
+        except Exception as e:
+            print(e)
 
     def verify(self, source_uri, renditions):
         """
