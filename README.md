@@ -119,3 +119,15 @@ pip install -r requirements.txt
 ```
 python -m pytest testing/tests
 ``` 
+
+## 6. lvpdiff filter Tests
+
+First, build and install ffmpeg with lvpdiff filter
+
+cd verification-classifier
+
+git checkout dev-lvpdiffverify
+
+python lvpdiffverify.py --v1path=/testdirectory/master.mp4 --v2path=/testdirectory/rendition.mp4 --mode=cpu --loopcpunt=10
+
+
