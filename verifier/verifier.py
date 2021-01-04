@@ -233,6 +233,117 @@ class Verifier:
                     os.remove(f)
             self.tmp_files.clear()
 
+    def getfeature(self, source_uri, renditions, indices):
+        """
+        Function that returns the predicted compliance of a list of renditions
+        with respect to a given source file using a specified model.
+        """
+        total_start = timeit.default_timer()
+        source_video, source_audio = self.get_video_audio(source_uri)
+        if not source_video and not source_audio:
+            raise ValueError('Couldn\'t retrieve source files')
+        try:
+            if source_video:
+                # Prepare source and renditions for verification
+                source = {'path': source_video,
+                          'audio_path': source_audio,
+                          'video_available': True,
+                          'audio_available': source_audio is not None,
+                          'uri': source_uri}
+
+                # Create a list of preverified renditions
+                pre_verified_renditions = []
+                for rendition in renditions:
+                    pre_verification = self.pre_verify(source, rendition)
+                    if rendition['video_available']:
+                        pre_verified_renditions.append(pre_verification)
+
+                # Remove non numeric features from feature list
+                non_temporal_features = ['attack_ID', 'title', 'attack', 'dimension', 'size', 'size_dimension_ratio']
+                metrics_list = []
+                features = list(np.unique(self.features_ul + self.features_sl))
+
+                for metric in features:
+                    if metric not in non_temporal_features:
+                        metrics_list.append(metric.split('-')[0])
+
+                # Initialize times for assets processing profiling
+                start = timeit.default_timer()
+
+                # Instantiate VideoAssetProcessor class
+                asset_processor = VideoAssetProcessor(source,
+                                                      pre_verified_renditions,
+                                                      metrics_list,
+                                                      self.do_profiling,
+                                                      self.max_samples,
+                                                      features,
+                                                      self.debug,
+                                                      self.use_gpu,
+                                                      indices)
+
+                # Record time for class initialization
+                initialize_time = timeit.default_timer() - start
+
+                # Register times for asset processing
+                start = timeit.default_timer()
+
+                #asset_processor.setindices(indices)
+                # Assemble output dataframe with processed metrics
+                metrics_df, pixels_df, dimensions_df = asset_processor.process()
+
+                # Record time for processing of assets metrics
+                process_time = timeit.default_timer() - start
+
+                x_renditions_sl = np.asarray(metrics_df[self.features_sl])
+                x_renditions_ul = np.asarray(metrics_df[self.features_ul])
+                x_renditions_ul = self.loaded_scaler.transform(x_renditions_ul)
+
+                np.set_printoptions(precision=6, suppress=True)
+                logger.debug(f'INPUT SL ARRAY: {x_renditions_sl}')
+                logger.debug(f'Unscaled INPUT UL ARRAY: {np.asarray(metrics_df[self.features_ul])}')
+                logger.debug(f'SCALED INPUT UL ARRAY: {x_renditions_ul}')
+                # Make predictions for given data
+                start = timeit.default_timer()
+                predictions_df = pd.DataFrame()
+                predictions_df['sl_pred_tamper'] = self.loaded_model_sl.predict(x_renditions_sl)
+                predictions_df['ocsvm_dist'] = self.loaded_model_ul.decision_function(x_renditions_ul)
+                predictions_df['ul_pred_tamper'] = (-self.loaded_model_ul.predict(x_renditions_ul)+1)/2
+                predictions_df['meta_pred_tamper'] = predictions_df.apply(self.meta_model, axis=1)
+                prediction_time = timeit.default_timer() - start
+
+                # Add predictions to rendition dictionary
+                i = 0
+                for _, rendition in enumerate(renditions):
+                    if rendition['video_available']:
+                        rendition.pop('path', None)
+                        rendition['ocsvm_dist'] = float(predictions_df['ocsvm_dist'].iloc[i])
+                        rendition['tamper_ul'] = int(predictions_df['ul_pred_tamper'].iloc[i])
+                        rendition['tamper_sl'] = int(predictions_df['sl_pred_tamper'].iloc[i])
+                        rendition['tamper'] = int(predictions_df['meta_pred_tamper'].iloc[i])
+                        # Append diff feature information
+                        rendition['difffeature'] = x_renditions_sl[i]
+                        # Append the post-verification of resolution and pixel count
+                        if 'pixels' in rendition:
+                            rendition['pixels_post_verification'] = float(rendition['pixels']) / pixels_df[i]
+                        if 'resolution' in rendition:
+                            rendition['resolution']['height_post_verification'] = float(rendition['resolution']['height']) / int(dimensions_df[i].split(':')[0])
+                            rendition['resolution']['width_post_verification'] = float(rendition['resolution']['width']) / int(dimensions_df[i].split(':')[1])
+                        i += 1
+
+                if self.do_profiling:
+                    logger.info(f'Features used: {features}')
+                    logger.info(f'Total time: {timeit.default_timer() - total_start}')
+                    logger.info(f'Initialization time: {initialize_time}')
+                    logger.info(f'Process time: {process_time}')
+                    logger.info(f'Prediction time: {prediction_time}')
+
+            return renditions
+        finally:
+            for f in self.tmp_files:
+                if os.path.exists(f):
+                    os.remove(f)
+            self.tmp_files.clear()
+
     def retrieve_models(self, uri, model_dir):
         """
         Function to obtain pre-trained model for verification predictions
@@ -287,14 +398,14 @@ class Verifier:
             audio_file = '{}_audio.wav'.format(video_file)
             logger.info('Extracting audio track')
             ffmpeg = subprocess.Popen(' '.join(['ffmpeg',
-                                                '-i',
-                                                video_file,
-                                                '-vn',
-                                                '-acodec',
-                                                'pcm_s16le',
-                                                '-loglevel',
-                                                'quiet',
-                                                audio_file]), stderr=subprocess.PIPE, stdout=subprocess.PIPE, shell=True)
+                             '-i',
+                             video_file,
+                             '-vn',
+                             '-acodec',
+                             'pcm_s16le',
+                             '-loglevel',
+                             'quiet',
+                             audio_file]), stderr=subprocess.PIPE, stdout=subprocess.PIPE, shell=True)
             stdout, stderr = ffmpeg.communicate()
             if ffmpeg.returncode:
                 logger.error(f'Could not extract audio from video file {stderr}')

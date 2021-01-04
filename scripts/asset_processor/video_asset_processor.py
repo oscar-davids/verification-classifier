@@ -31,7 +31,7 @@ class VideoAssetProcessor:
     """
 
     def __init__(self, original, renditions, metrics_list,
-                 do_profiling=False, max_samples=-1, features_list=None, debug_frames=False, use_gpu=False, channel=-1, image_pair_callback=None):
+                 do_profiling=False, max_samples=-1, features_list=None, debug_frames=False, use_gpu=False, indices="", channel=-1, image_pair_callback=None):
         """
 
         @param use_gpu:
@@ -103,6 +103,15 @@ class VideoAssetProcessor:
             # Convert OpenCV video captures of original to list
             # of numpy arrays for better performance of numerical computations
             self.master_indexes = []
+
+            if len(indices) > 0:
+                tmpindices = indices.replace('"', '')
+                strarray = tmpindices.split(',')
+                narrary = [int(i) for i in strarray]
+                self.master_indexes = np.array(narrary)
+
+            self.master_timestamps = []
+
             self.markup_master_frames = True
             master_idx_map, self.master_samples, self.master_samples_hd, self.master_pixels, self.height, self.width = self.capture_to_array(self.master_capture)
             self.master_capture.release()
@@ -146,7 +155,7 @@ class VideoAssetProcessor:
         """
         # Create list of random timestamps in video file to calculate metrics at
         if self.markup_master_frames:
-            self.master_indexes = np.sort(np.random.choice(self.total_frames, self.max_samples, False))
+            #self.master_indexes = np.sort(np.random.choice(self.total_frames, self.max_samples, False))
             self.master_timestamps = []
 
         # difference between master timestamp and best matching frame timestamp of current video
