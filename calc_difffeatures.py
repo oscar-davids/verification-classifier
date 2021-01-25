@@ -19,11 +19,11 @@ if __name__ == "__main__":
     renddir = args.renddir
     negative = args.negative
 
-    outcsv = "difffeature" + datetime.datetime.now().strftime("%m%d%H") + ".csv"
+    outcsv = "difffeature" + datetime.datetime.now().strftime("%m%d%H%M%S") + ".csv"
     fileout = open(outcsv, 'w', newline='')
     wr = csv.writer(fileout)
     wr.writerow(['filepath', 'width', 'height', 'fps', 'bitrate',
-                 'profile', 'devmode', 'framecount', 'indices', 'outpath', 'position', 'length', 'features', 'target'])
+                 'profile', 'devmode', 'framecount', 'indices', 'outpath', 'position', 'length', 'features', 'infertarget'])
     max_samples = 10
     debug = False
     logcount = 0
